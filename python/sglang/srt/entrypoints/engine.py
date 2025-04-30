@@ -504,7 +504,7 @@ def _launch_subprocesses(
     _set_envs_and_config(server_args)
 
     # Allocate ports for inter-process communications
-    # 分配进程间通信的端口
+    # 分配进程间通信的端口 ?
     if port_args is None:
         port_args = PortArgs.init_new(server_args)
         logger.info(f"{server_args=}")
@@ -572,26 +572,35 @@ def _launch_subprocesses(
             scheduler_pipe_readers.append(reader) # 更新用于进程间通信的读端口列表
     else:
         # 否则，会启动数据并行模式
+        # 数据并行模式，只启动一个专用的数据并行控制器进程
+
         # Launch the data parallel controller
+
+        # 创建用于进程间通信的管道
         reader, writer = mp.Pipe(duplex=False)
+        # 更新用于进程间通信的读端口列表
         scheduler_pipe_readers = [reader]
+        # 创建新的进程，使用 run_data_parallel_controller_process 函数作为目标函数
         proc = mp.Process(
             target=run_data_parallel_controller_process,
             args=(server_args, port_args, writer),
         )
+        # 启动进程
         proc.start()
+        # 更新进程列表
         scheduler_procs.append(proc)
 
 
-
-
-
-
-
+    """
+    非主节点的进程会在这里阻塞
+    """
+    # 如果当前节点的序号大于等于1，表示是多节点的情况
+    # 也就是说，主节点的序号为0，其他节点的序号为1, 2, ...
     if server_args.node_rank >= 1:
         # In multi-node cases, non-zero rank nodes do not need to run tokenizer or detokenizer,
         # so they can just wait here.
 
+        # 等待每一个子进程发出 "ready" 的信号
         for reader in scheduler_pipe_readers:
             data = reader.recv()
             assert data["status"] == "ready"
@@ -600,6 +609,9 @@ def _launch_subprocesses(
             # When using `Engine` as a Python API, we don't want to block here.
             return None, None
 
+        # 启动一个健康检查的服务器，仅用于健康检查
+        # 给 /health 发送请求，会返回 200
+        # 主进程会阻塞在这个服务中
         launch_dummy_health_check_server(server_args.host, server_args.port)
 
         for proc in scheduler_procs:
@@ -609,7 +621,13 @@ def _launch_subprocesses(
             )
         return None, None
 
+
+    """
+    主节点的进程会在这里继续执行
+    """
+
     # Launch detokenizer process
+    # 启动一个 detokenizer 子进程
     detoken_proc = mp.Process(
         target=run_detokenizer_process,
         args=(
@@ -620,17 +638,45 @@ def _launch_subprocesses(
     detoken_proc.start()
 
     # Launch tokenizer process
+    # 启动一个 tokenizer 子进程
     tokenizer_manager = TokenizerManager(server_args, port_args)
+
+    # ┌────────────────────────────┐
+    # │        HTTP 请求：          │
+    # │  POST /v1/chat/completions │  ←←← OpenAI 接口格式（messages）
+    # └────────────────────────────┘
+    #             │
+    #             ▼
+    # ┌────────────────────────────┐
+    # │  模板系统: Prompt Template  │  ←←← 决定如何拼接 prompt 给不同模型
+    # └────────────────────────────┘
+    #             │
+    #             ▼
+    # ┌────────────────────────────┐
+    # │    多模型支持（后端）         │
+    # │  Qwen / Yi / LLaMA / GLM…  │  ←←← 都能被调度运行
+    # └────────────────────────────┘
+
+    # SGLang 默认实现的是 OpenAI 接口标准：/v1/chat/completions 和 /v1/completions
+    # OpenAI 接口已成为“行业标准”
+    # 其他模型通过模板系统（Prompt Template）来支持
+
+    # 加载不同的模板系统，加载到 TokenizerManager 中
     if server_args.chat_template:
         load_chat_template_for_openai_api(
             tokenizer_manager, server_args.chat_template, server_args.model_path
         )
     else:
         guess_chat_template_name_from_model_path(server_args.model_path)
+    # 结果是设置了 chat_template_name 为指定的模板名称，自定义模板还需要加载
 
+
+    # 加载 Completion 模板
     if server_args.completion_template:
         load_completion_template_for_openai_api(server_args.completion_template)
 
+
+    # 等待之前针对每个 GPU 创建的子进程发出 "ready" 的信号
     # Wait for the model to finish loading
     scheduler_infos = []
     for i in range(len(scheduler_pipe_readers)):
@@ -652,5 +698,8 @@ def _launch_subprocesses(
 
     # Assume all schedulers have the same scheduler_info
     scheduler_info = scheduler_infos[0]
+    # 获取子进程中读取的的token限制，单个请求能被接受的最大输入 token 数，然后传给 TokenizerManager
     tokenizer_manager.max_req_input_len = scheduler_info["max_req_input_len"]
+
+    # 返回 TokenizerManager 和 scheduler_info
     return tokenizer_manager, scheduler_info
