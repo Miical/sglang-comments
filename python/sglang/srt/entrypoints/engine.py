@@ -498,48 +498,80 @@ def _launch_subprocesses(
     Launch the TokenizerManager in the main process, the Scheduler in a subprocess, and the DetokenizerManager in another subprocess.
     """
     # Configure global environment
+    # 配置全局环境
     configure_logger(server_args)
     server_args.check_server_args()
     _set_envs_and_config(server_args)
 
     # Allocate ports for inter-process communications
+    # 分配进程间通信的端口
     if port_args is None:
         port_args = PortArgs.init_new(server_args)
         logger.info(f"{server_args=}")
 
     # If using model from www.modelscope.cn, first download the model.
+    # 如果使用www.modelscope.cn上的模型，首先下载模型
     server_args.model_path, server_args.tokenizer_path = prepare_model_and_tokenizer(
         server_args.model_path, server_args.tokenizer_path
     )
 
+    # 所有子进程的列表
     scheduler_procs = []
+
+    # dp_size == 1 表示数据并行的大小为1，会启动张量并行模式
     if server_args.dp_size == 1:
         # Launch tensor parallel scheduler processes
+
+        # 参数 enable_memory_saver 是 SGLang 在模型推理中用于节省显存（GPU memory）的一种可选机制。
+        # 它的作用是 启用 torch-memory-saver 插件，在推理时以更智能的方式释放或复用张量的显存，从而降低 GPU 占用。
+        # torch-memory-saver 插件的核心思想是： 在不影响最终输出的前提下，智能释放或回收模型 forward 过程中产生的中间张量，
+        # 降低峰值显存使用
         memory_saver_adapter = TorchMemorySaverAdapter.create(
             enable=server_args.enable_memory_saver
         )
 
+        # 读取子进程数据的端口 的列表
         scheduler_pipe_readers = []
+
+        # 通过张量大小和节点数量计算 -> 每个节点的张量并行大小
+        # tp_size 表示将模型的张量切分成多少份，在多少个 GPU 上并行执行；
+        # nnodes 表示部署的节点数（每个节点为一台机器，可能包含多个 GPU）。
+        # tp_size_per_node 表示 每台机器（节点）上需要参与张量并行的 GPU 数量，也就是：每个节点承担的张量切分份额。
         tp_size_per_node = server_args.tp_size // server_args.nnodes
+
+        # node_rank 是当前节点的序号
+        # 通过节点的序号和张量并行大小计算 -> 当前节点分配到的张量切片（全局 GPU ID）的范围
         tp_rank_range = range(
             tp_size_per_node * server_args.node_rank,
             tp_size_per_node * (server_args.node_rank + 1),
         )
+
+        # 对于每个 tp_rank(全局 GPU ID)
         for tp_rank in tp_rank_range:
+            # 创建用于进程间通信的管道
             reader, writer = mp.Pipe(duplex=False)
+
+            # 计算局部 GPU ID，（在这里可以指定每个节点的 base_gpu_id 和 gpu_id_step）
             gpu_id = (
                 server_args.base_gpu_id
                 + (tp_rank % tp_size_per_node) * server_args.gpu_id_step
             )
+            # 创建新进程，使用 run_scheduler_process 函数作为目标函数
+            # 进程的参数 公共的: server_args, port_args
+            # 进程的参数 私有的: gpu_id(局部gpu id), tp_rank(全局gpu id), writer(用于进程间通信的写端口)
             proc = mp.Process(
                 target=run_scheduler_process,
                 args=(server_args, port_args, gpu_id, tp_rank, None, writer),
             )
+
+            # 启动进程
             with memory_saver_adapter.configure_subprocess():
                 proc.start()
-            scheduler_procs.append(proc)
-            scheduler_pipe_readers.append(reader)
+
+            scheduler_procs.append(proc) # 更新进程列表
+            scheduler_pipe_readers.append(reader) # 更新用于进程间通信的读端口列表
     else:
+        # 否则，会启动数据并行模式
         # Launch the data parallel controller
         reader, writer = mp.Pipe(duplex=False)
         scheduler_pipe_readers = [reader]
@@ -549,6 +581,12 @@ def _launch_subprocesses(
         )
         proc.start()
         scheduler_procs.append(proc)
+
+
+
+
+
+
 
     if server_args.node_rank >= 1:
         # In multi-node cases, non-zero rank nodes do not need to run tokenizer or detokenizer,

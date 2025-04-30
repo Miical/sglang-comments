@@ -1280,8 +1280,10 @@ def prepare_server_args(argv: List[str]) -> ServerArgs:
     Returns:
         The server arguments.
     """
+    # 创建解析器，并添加需要识别的参数
     parser = argparse.ArgumentParser()
     ServerArgs.add_cli_args(parser)
+    # 解析命令行参数，然后创建 ServerArgs 实例并返回
     raw_args = parser.parse_args(argv)
     server_args = ServerArgs.from_cli_args(raw_args)
     return server_args
