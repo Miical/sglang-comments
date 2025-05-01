@@ -715,16 +715,34 @@ def launch_server(
     )
 
     # Add api key authorization
+    # 在 HTTP 服务器中添加 API 密钥授权，必须拥有 API 密钥才能访问 HTTP 服务器。
     if server_args.api_key:
         add_api_key_middleware(app, server_args.api_key)
 
     # Add prometheus middleware
+    # Prometheus 是一个开源的系统监控和指标收集工具，用于记录服务运行时的各种数据指标，并支持查询、告警、可视化。
+    #         +--------------------+
+            # |   SGLang 模型服务  |
+            # |  /metrics 暴露指标 |
+            # +--------------------+
+            #             ↑
+            #             |   HTTP 请求每 15 秒拉一次
+            #     Prometheus Server
+            #             ↓
+            #     [TSDB] 时序数据库
+            #             ↓
+            #     查询 & 告警
+            #             ↓
+            #         Grafana 可视化
+
     if server_args.enable_metrics:
         add_prometheus_middleware(app)
         enable_func_timer()
 
+
     # Send a warmup request - we will create the thread launch it
     # in the lifespan after all other warmups have fired.
+    # 用 threading.Thread 启动一个后台线程，执行 _wait_and_warmup(...) 函数，让模型提前加载一次推理请求，确保服务启动后首次响应不卡顿。
     warmup_thread = threading.Thread(
         target=_wait_and_warmup,
         args=(
@@ -741,6 +759,7 @@ def launch_server(
         set_uvicorn_logging_configs()
         app.server_args = server_args
         # Listen for HTTP requests
+        # 启动 HTTP 服务器，阻塞主线程，监听 HTTP 请求。
         uvicorn.run(
             app,
             host=server_args.host,

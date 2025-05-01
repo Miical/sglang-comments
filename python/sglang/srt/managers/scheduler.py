@@ -169,8 +169,8 @@ class Scheduler(
         self,
         server_args: ServerArgs,
         port_args: PortArgs,
-        gpu_id: int,
-        tp_rank: int,
+        gpu_id: int,    # 节点局部GPU ID
+        tp_rank: int,   # 全局张量 ID
         dp_rank: Optional[int],
     ):
         # Parse args
@@ -192,6 +192,12 @@ class Scheduler(
         self.page_size = server_args.page_size
 
         # Distributed rank info
+        # DP Attention = “Data-Parallel Attention” ——专门给 DeepSeek 系模型（用 MLA = Multi-head Latent Attention）设计的一种
+        # 是一种将注意力计算从 Tensor Parallel 中拆分出来，转而使用 Data Parallel 方式执行的优化策略
+        # 在大模型（如 LLaMA、GPT 等）中，注意力层的计算代价非常高，而在多卡部署中，注意力层往往采用 Tensor Parallel（TP）来切分头部数量并并行执行。
+        # https://lmsys.org/blog/2024-12-04-sglang-v0-4/#data-parallelism-attention-for-deepseek-models
+        # 可以让每个DP工作器去处理不同类型的Batch（Prefill, Decode, Idle)
+        # ? 为何会提高吞吐，不同类型的Batch如何调度
         self.dp_size = server_args.dp_size
         self.attn_tp_rank, self.attn_tp_size, self.dp_rank = (
             compute_dp_attention_world_info(
@@ -201,9 +207,13 @@ class Scheduler(
                 self.dp_size,
             )
         )
+        # 计算得出当前 scheduler 需要处理第 dp_rank 个数据并行单位中的第 attn_tp_rank 个张量并行单位
 
         # Init inter-process communication
+        # ZeroMQ（简称 ZMQ 或 ØMQ）是一个高性能、异步消息传输库，用于在分布式系统中进行通信。
+        # 你可以把它看作是一个比套接字更强大、更灵活的网络通信中间层。
         context = zmq.Context(2)
+        # 如果当前scheduler是数据并行中的第一个scheduler
         if self.attn_tp_rank == 0:
             self.recv_from_tokenizer = get_zmq_socket(
                 context, zmq.PULL, port_args.scheduler_input_ipc_name, False
@@ -1987,12 +1997,14 @@ def run_scheduler_process(
     pipe_writer,
 ):
     # Generate the prefix
+    # 生成前缀
     if dp_rank is None:
         prefix = f" TP{tp_rank}"
     else:
         prefix = f" DP{dp_rank} TP{tp_rank}"
 
     # Config the process
+    # 配置子进程
     kill_itself_when_parent_died()
     setproctitle.setproctitle(f"sglang::scheduler{prefix.replace(' ', '_')}")
     faulthandler.enable()
@@ -2007,11 +2019,13 @@ def run_scheduler_process(
     suppress_other_loggers()
 
     # Set cpu affinity to this gpu process
+    # 为每个进程绑定特定的CPU核心
     if get_bool_env_var("SGLANG_SET_CPU_AFFINITY"):
         set_gpu_proc_affinity(server_args.tp_size, server_args.nnodes, gpu_id)
 
     # Create a scheduler and run the event loop
     try:
+        # 创建每个子进程对应的 Scheduler
         scheduler = Scheduler(server_args, port_args, gpu_id, tp_rank, dp_rank)
         pipe_writer.send(
             {

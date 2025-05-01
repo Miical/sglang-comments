@@ -11,6 +11,8 @@ sglang/
         - entrypoint/
             - http_server.py  # 3. http服务器
             - engine.py       # 4. SRT引擎
+        - managers/
+            - scheduler.py    # 5. 调度器
 
 ```
 

@@ -788,6 +788,9 @@ def set_ulimit(target_soft_limit=65535):
 
 
 def add_api_key_middleware(app, api_key: str):
+    """
+    全局 HTTP 请求拦截
+    """
     @app.middleware("http")
     async def authentication(request, call_next):
         if request.method == "OPTIONS":
@@ -796,6 +799,8 @@ def add_api_key_middleware(app, api_key: str):
             return await call_next(request)
         if request.url.path.startswith("/metrics"):
             return await call_next(request)
+        # 如果不是健康检查和指标请求，检查 Authorization 头
+        # 如果 Authorization 头不正确，返回 401 Unauthorized
         if request.headers.get("Authorization") != "Bearer " + api_key:
             return ORJSONResponse(content={"error": "Unauthorized"}, status_code=401)
         return await call_next(request)

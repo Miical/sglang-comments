@@ -32,8 +32,11 @@ def compute_dp_attention_world_info(enable_dp_attention, tp_rank, tp_size, dp_si
     if not enable_dp_attention:
         return tp_rank, tp_size, 0
 
+    # 数据并行的每个单位需要处理的张量划分数
     attn_tp_size = tp_size // dp_size
+    # 当前scheduler(GPU)对应的数据并行rank
     dp_rank = tp_rank // attn_tp_size
+    # 当前scheduler(GPU)在当前数据并行单位中对应的局部张量rank
     attn_tp_rank = tp_rank % attn_tp_size
     return attn_tp_rank, attn_tp_size, dp_rank
 
