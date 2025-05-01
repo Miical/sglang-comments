@@ -504,7 +504,7 @@ def _launch_subprocesses(
     _set_envs_and_config(server_args)
 
     # Allocate ports for inter-process communications
-    # 分配进程间通信的端口 ?
+    # 初始化了进程间通信的端口名称
     if port_args is None:
         port_args = PortArgs.init_new(server_args)
         logger.info(f"{server_args=}")

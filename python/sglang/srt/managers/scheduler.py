@@ -213,8 +213,12 @@ class Scheduler(
         # ZeroMQ（简称 ZMQ 或 ØMQ）是一个高性能、异步消息传输库，用于在分布式系统中进行通信。
         # 你可以把它看作是一个比套接字更强大、更灵活的网络通信中间层。
         context = zmq.Context(2)
-        # 如果当前scheduler是数据并行中的第一个scheduler
         if self.attn_tp_rank == 0:
+        # 如果当前scheduler是数据并行中的第一个scheduler
+        # 需要初始化 与tokenizer 之间 send/recv 的 socket
+        #     初始化与 detokenizer 之间 send 的 socket
+        #     初始化与 RPC 之间 send 的 socket
+
             self.recv_from_tokenizer = get_zmq_socket(
                 context, zmq.PULL, port_args.scheduler_input_ipc_name, False
             )
@@ -237,12 +241,15 @@ class Scheduler(
                 context, zmq.DEALER, port_args.rpc_ipc_name, False
             )
         else:
+        # 如果当前scheduler不是数据并行中的第一个scheduler
+        # 不需要管通信
             self.recv_from_tokenizer = None
             self.recv_from_rpc = None
             self.send_to_tokenizer = SimpleNamespace(send_pyobj=lambda x: None)
             self.send_to_detokenizer = SimpleNamespace(send_pyobj=lambda x: None)
 
         # Init tokenizer
+        # 创建了 self.tokenizer，支持直接使用
         self.init_tokenizer()
 
         # Set reasoning_parser and think_end_id if --reasoning_parser is enabled
@@ -440,6 +447,7 @@ class Scheduler(
     def init_tokenizer(self):
         server_args = self.server_args
 
+        # ModelConfig 是一个模型的配置结构体，用来初始化模型所需的所有参数
         self.model_config = ModelConfig(
             server_args.model_path,
             trust_remote_code=server_args.trust_remote_code,
@@ -466,6 +474,11 @@ class Scheduler(
                 )
                 self.tokenizer = self.processor.tokenizer
             else:
+                # 从 Huggingface Hub 或本地路径加载指定的 tokenizer。它支持多种场景，包括加载远程模型、从 GGUF 文件加载等
+                # self.tokenizer就能直接使用了
+                # tokenizer.tokenize("Hello, how are you?")
+                # tokenizer.encode("Hello, how are you?")
+                # tokenizer.decode([101, 7592, 1010, 2129, 2024, 2017, 102])
                 self.tokenizer = get_tokenizer(
                     server_args.tokenizer_path,
                     tokenizer_mode=server_args.tokenizer_mode,
