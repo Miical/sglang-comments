@@ -197,7 +197,7 @@ class Scheduler(
         # 在大模型（如 LLaMA、GPT 等）中，注意力层的计算代价非常高，而在多卡部署中，注意力层往往采用 Tensor Parallel（TP）来切分头部数量并并行执行。
         # https://lmsys.org/blog/2024-12-04-sglang-v0-4/#data-parallelism-attention-for-deepseek-models
         # 可以让每个DP工作器去处理不同类型的Batch（Prefill, Decode, Idle)
-        # ? 为何会提高吞吐，不同类型的Batch如何调度
+        # TODO: DP Attention原理，为何会提高吞吐，不同类型的Batch如何调度
         self.dp_size = server_args.dp_size
         self.attn_tp_rank, self.attn_tp_size, self.dp_rank = (
             compute_dp_attention_world_info(
@@ -253,6 +253,7 @@ class Scheduler(
         self.init_tokenizer()
 
         # Set reasoning_parser and think_end_id if --reasoning_parser is enabled
+        # 处理推理内容
         if self.server_args.reasoning_parser and self.tokenizer:
             reasoning_parser = ReasoningParser(
                 model_type=self.server_args.reasoning_parser, stream_reasoning=False
@@ -262,6 +263,8 @@ class Scheduler(
             )[0]
 
         # Check whether overlap can be enabled
+        # Overlap scheduler 是一种调度策略，旨在通过重叠计算和通信来提高性能
+        # TODO: Overlap scheduler 原理
         if not self.is_generation:
             self.enable_overlap = False
             logger.info("Overlap scheduler is disabled for embedding models.")
@@ -272,6 +275,7 @@ class Scheduler(
         else:
             TpWorkerClass = TpModelWorker
 
+        # 关键：创建了 TpWorker
         self.tp_worker = TpWorkerClass(
             server_args=server_args,
             gpu_id=gpu_id,

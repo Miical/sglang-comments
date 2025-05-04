@@ -1406,6 +1406,16 @@ class RemoteModelLoader(BaseModelLoader):
 
 def get_model_loader(load_config: LoadConfig) -> BaseModelLoader:
     """Get a model loader based on the load format."""
+    """
+    load_format	Loader 类	本质用途
+    DUMMY	DummyModelLoader	不加载权重，随机初始化模型（调试用）
+    SHARDED_STATE	ShardedStateLoader	支持 HuggingFace 多分片 .bin 权重
+    BITSANDBYTES	BitsAndBytesModelLoader	加载 8-bit、4-bit 量化模型（使用 bitsandbytes）
+    GGUF	GGUFModelLoader	加载 llama.cpp 格式的 .gguf 权重（用于低配推理）
+    LAYERED	LayeredModelLoader	用于结构/权重分离加载（多阶段加载模型）
+    REMOTE	RemoteModelLoader	权重托管在远程服务，延迟加载（如多机）
+    (默认)	DefaultModelLoader	加载常规 .bin 或 .safetensors，通常等价于 HuggingFace 模式
+    """
 
     if isinstance(load_config.load_format, type):
         return load_config.load_format(load_config)

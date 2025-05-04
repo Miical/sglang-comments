@@ -102,6 +102,8 @@ logger = logging.getLogger(__name__)
 
 class ModelRunner:
     """ModelRunner runs the forward passes of the models."""
+    # ModelRunner 是每个 GPU 上的“大模型推理执行器”，它管理模型加载、推理前向、量化、TP分布、注意力后端、KV Cache 分配、显存初始化、
+    # CUDA Graph 等等。 在整个系统中，TpModelWorker 是更高层的 worker，但真正「调用大模型前向」的，是 ModelRunner。
 
     def __init__(
         self,
@@ -171,9 +173,12 @@ class ModelRunner:
         )
 
         # CPU offload
+        # 本质：设置最大允许从显存挪到 CPU 的 KV Cache 大小（以节省显存）
+        # 默认不开启；适合在显存爆炸但对延迟要求不高时开启。
         set_cpu_offload_max_bytes(int(server_args.cpu_offload_gb * 1024**3))
 
         # Get memory before model loading
+        # ! 初始化了分布式通信，很重要
         min_per_gpu_memory = self.init_torch_distributed()
 
         # Update deep gemm configure
@@ -190,6 +195,7 @@ class ModelRunner:
         )
 
         # Load the model
+        # Sampler() 是后续进行 top-k、nucleus、temperature 等采样策略模块
         self.sampler = Sampler()
         self.load_model()
 
@@ -207,6 +213,8 @@ class ModelRunner:
             self.apply_torch_tp()
 
         # Init lora
+        # LoRA 是一种“只训练小 patch、保持主模型冻结”的微调方法，SGLang 中通过加载 LoRA 权重，
+        # 实现轻量适配与能力扩展，非常适合用户自定义能力注入。
         if server_args.lora_paths is not None:
             self.init_lora_manager()
 
@@ -218,7 +226,11 @@ class ModelRunner:
         )
         if self.device == "cuda":
             self.init_cublas()
+            # ! 加载高效 attention 算法
             self.init_attention_backend()
+            # ! 捕获推理静态 CUDA Graph
+            # 它会把模型的前向推理过程 录制成一个 CUDA Graph，后续每次 token 推理都可以复用这个 Graph 直接 launch，
+            # 极大减少 kernel launch 的开销。
             self.init_cuda_graphs()
         else:
             self.cuda_graph_runner = None
@@ -408,6 +420,7 @@ class ModelRunner:
         # This can reduce thread conflicts and speed up weight loading.
         if self.device != "cpu":
             torch.set_num_threads(1)
+        #  判断当前 GPU 架构，调整精度（dtype）
         if self.device == "cuda":
             if torch.cuda.get_device_capability()[0] < 8:
                 logger.info(
@@ -428,6 +441,7 @@ class ModelRunner:
         if self.server_args.load_format == "gguf":
             monkey_patch_vllm_gguf_config()
 
+        # ! 核心：构建模型实例
         # Load the model
         # Remove monkey_patch when linear.py quant remove dependencies with vllm
         monkey_patch_vllm_parallel_state()

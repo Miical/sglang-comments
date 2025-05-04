@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 class TpModelWorker:
     """A tensor parallel model worker."""
+    # TpModelWorker 是每个参与 TP 分布式推理的 GPU 节点上的“主执行者”，控制加载、分配、运行、清理模型任务。
 
     def __init__(
         self,

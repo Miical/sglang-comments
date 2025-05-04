@@ -13,6 +13,9 @@ sglang/
             - engine.py       # 4. SRT引擎
         - managers/
             - scheduler.py    # 5. 调度器
+            - tp_worker.py    # 6. TpWorker
+        - model_executor
+            - model_runner.py # 7. 模型执行器
 
 ```
 
