@@ -74,6 +74,7 @@ class TpModelWorker:
             quantization=server_args.quantization,
             is_draft_model=is_draft_worker,
         )
+        # 把模型结构以及运行配置都搞定了
         self.model_runner = ModelRunner(
             model_config=self.model_config,
             mem_fraction_static=server_args.mem_fraction_static,

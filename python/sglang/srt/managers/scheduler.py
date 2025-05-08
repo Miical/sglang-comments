@@ -641,6 +641,7 @@ class Scheduler(
         """A normal scheduler loop."""
         while True:
             recv_reqs = self.recv_requests()
+            # 把请求放到了等待队列中
             self.process_input_requests(recv_reqs)
 
             batch = self.get_next_batch_to_run()

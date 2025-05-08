@@ -567,16 +567,21 @@ async def separate_reasoning_request(obj: SeparateReasoningReqInput, request: Re
 ##### OpenAI-compatible API endpoints #####
 
 
+# /v1/completions — 传统文本生成 API
+# 给你一个 prompt，让模型自动补全后续文本。
 @app.post("/v1/completions")
 async def openai_v1_completions(raw_request: Request):
     return await v1_completions(_global_state.tokenizer_manager, raw_request)
 
 
+# 支持多轮对话的输入结构，让模型模拟人类对话。
 @app.post("/v1/chat/completions")
 async def openai_v1_chat_completions(raw_request: Request):
     return await v1_chat_completions(_global_state.tokenizer_manager, raw_request)
 
 
+# /v1/embeddings — 文本向量抽取 APIs
+# 把一句话转成向量（embedding），用于计算相似度、检索、聚类等。
 @app.post("/v1/embeddings", response_class=ORJSONResponse)
 async def openai_v1_embeddings(raw_request: Request):
     response = await v1_embeddings(_global_state.tokenizer_manager, raw_request)

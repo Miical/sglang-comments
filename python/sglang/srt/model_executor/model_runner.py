@@ -219,6 +219,7 @@ class ModelRunner:
             self.init_lora_manager()
 
         # Init memory pool and attention backends
+        # ! 在这里创建了 kv cache
         self.init_memory_pool(
             min_per_gpu_memory,
             server_args.max_running_requests,
@@ -369,6 +370,7 @@ class ModelRunner:
 
         if not self.is_draft_worker:
             # Only initialize the distributed environment on the target model worker.
+            # ! 在这里初始化了每个 GPU 中的张量编号，后面加载的模型权重会用到这个编号
             init_distributed_environment(
                 backend=backend,
                 world_size=self.tp_size,
@@ -447,6 +449,7 @@ class ModelRunner:
         monkey_patch_vllm_parallel_state()
         monkey_patch_isinstance_for_vllm_base_layer()
 
+        # 从列表中找到模型的类定义（pytorch实现），然后实例化
         with self.memory_saver_adapter.region():
             self.model = get_model(
                 model_config=self.model_config,

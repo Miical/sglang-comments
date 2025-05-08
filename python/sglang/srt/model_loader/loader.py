@@ -145,11 +145,13 @@ def _initialize_model(
     load_config: LoadConfig,
 ) -> nn.Module:
     """Initialize a model with the given configurations."""
+    # 会返回repo中找到的模型类
     model_class, _ = get_model_architecture(model_config)
     packed_modules_mapping = getattr(model_class, "packed_modules_mapping", {})
     quant_config = _get_quantization_config(
         model_config, load_config, packed_modules_mapping
     )
+    # 真正实例化模型
     return model_class(
         config=model_config.hf_config,
         quant_config=quant_config,
