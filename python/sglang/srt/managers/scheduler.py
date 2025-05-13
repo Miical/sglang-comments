@@ -1159,8 +1159,15 @@ class Scheduler(
 
     def get_next_batch_to_run(self) -> Optional[ScheduleBatch]:
         # Merge the prefill batch into the running batch
+        # last_batch 是刚执行完的 batch
+        # 如果上一个执行完的 batch 是 prefill
         if self.last_batch and self.last_batch.forward_mode.is_extend():
+            # 如果有 chunked_req
             if self.chunked_req:
+                # ? 把 chunked_req 从 last_batch 中移除
+                # ? 并且把 chunked_req 放到 tree_cache 中
+                # ? 清空原来的 kv cache
+
                 # Move the chunked request out of the batch so that we can merge
                 # only finished requests to running_batch.
                 self.last_batch.filter_batch(chunked_req_to_exclude=self.chunked_req)
@@ -1170,6 +1177,7 @@ class Scheduler(
                 self.running_batch.batch_is_full = False
 
             # Filter batch
+            # 更新 last_batch 的相关状态
             last_bs = self.last_batch.batch_size()
             self.last_batch.filter_batch()
             if self.last_batch.batch_size() < last_bs:
@@ -1177,18 +1185,23 @@ class Scheduler(
 
             # Merge the new batch into the running batch
             if not self.last_batch.is_empty():
+                # 如果当前没有运行的请求，直接运行 last_batch 去做 decode
                 if self.running_batch.is_empty():
                     self.running_batch = self.last_batch
                 else:
                     # Merge running_batch with prefill batch
+                    # 否则就去merge到当前的running_batch中
                     self.running_batch.merge_batch(self.last_batch)
 
+        # 从 wait queue 里创建一个新的 new_batch
         new_batch = self.get_new_batch_prefill()
         if new_batch is not None:
             # Run prefill first if possible
+            # 如果成功创建优先运行 prefill
             ret = new_batch
         else:
             # Run decode
+            # 否则继续运行当前的 running_batch 的 decode
             if not self.running_batch.is_empty():
                 self.running_batch = self.update_running_batch(self.running_batch)
                 ret = self.running_batch if not self.running_batch.is_empty() else None
@@ -1396,6 +1409,7 @@ class Scheduler(
 
         # Run forward
         if self.is_generation:
+            # 不使用 speculative decoding （草稿推理，如 EAGLE）
             if self.spec_algorithm.is_none():
                 model_worker_batch = batch.get_model_worker_batch()
                 logits_output, next_token_ids = self.tp_worker.forward_batch_generation(

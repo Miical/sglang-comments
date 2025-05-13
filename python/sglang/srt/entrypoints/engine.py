@@ -545,6 +545,7 @@ def _launch_subprocesses(
             tp_size_per_node * server_args.node_rank,
             tp_size_per_node * (server_args.node_rank + 1),
         )
+        # 当前节点需要处理的张量的范围
 
         # 对于每个 tp_rank(全局 GPU ID)
         for tp_rank in tp_rank_range:
