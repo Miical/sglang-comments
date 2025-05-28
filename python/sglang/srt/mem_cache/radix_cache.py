@@ -175,7 +175,9 @@ class RadixCache(BasePrefixCache):
             self.req_to_token_pool.free(req.req_pool_idx)
             return
 
+        # 所有 Token
         token_ids = (req.origin_input_ids + req.output_ids)[:-1]
+        # req_to_token_pool 中对应的一行
         kv_indices = self.req_to_token_pool.req_to_token[
             req.req_pool_idx, : len(token_ids)
         ]
@@ -185,13 +187,18 @@ class RadixCache(BasePrefixCache):
             page_aligned_kv_indices = kv_indices[:page_aligned_len].clone()
             self.token_to_kv_pool_allocator.free(kv_indices[page_aligned_len:])
         else:
+            # 所有 token 的数量
             page_aligned_len = len(kv_indices)
+            # req_to_token_pool 中对应的一行
             page_aligned_kv_indices = kv_indices.clone()
 
         # Radix Cache takes one ref in memory pool
+        # insert(所有token, req_to_token_pool对应行)
+        # new_prefix_len 返回的是最长公共前缀的长度
         new_prefix_len = self.insert(
             token_ids[:page_aligned_len], page_aligned_kv_indices
         )
+        # 删除掉公共部分占据的allocator，后面的保留
         self.token_to_kv_pool_allocator.free(
             kv_indices[len(req.prefix_indices) : new_prefix_len]
         )

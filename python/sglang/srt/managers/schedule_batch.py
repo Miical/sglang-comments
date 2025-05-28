@@ -835,7 +835,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                 "alloc_req_slots runs out of memory. "
                 "Please set a smaller number for `--max-running-requests`. "
                 f"{self.req_to_token_pool.available_size()=}, "
-                f"{num_reqs=}, "
+            f"{num_reqs=}, "
             )
         return req_pool_indices
 
@@ -1016,20 +1016,34 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         self.forward_mode = ForwardMode.EXTEND
 
         # Allocate req slots
+        # 每个请求分配的索引号(req_to_token)
         bs = len(self.reqs)
         req_pool_indices = self.alloc_req_slots(bs)
 
+
+        # 一个请求包含 prefix 和 extend
+        #            |         \ 新增加的 token 的数量
+        #            之前已经在缓存里能检索到的
+
         # Init tensors
         reqs = self.reqs
+        # extend 部分的 token id 列表
         input_ids = [r.fill_ids[len(r.prefix_indices) :] for r in reqs]
+        # 所有请求 extend 部分数量总和
         extend_num_tokens = sum(len(ids) for ids in input_ids)
+
+        # 请求列表： prefix + extend 长度
         seq_lens = [len(r.fill_ids) for r in reqs]
+        # 请求列表： prefix 长度
         prefix_lens = [len(r.prefix_indices) for r in reqs]
+        # 请求列表： extend 长度
         extend_lens = [r.extend_input_len for r in reqs]
 
+        # 给上面创建好的东西变成 tensor
         req_pool_indices_tensor = torch.tensor(req_pool_indices, dtype=torch.int64).to(
             self.device, non_blocking=True
         )
+        #! 这里把一整个 batch 需要 extend 的字符拿出来，拼成了一个 tensor
         input_ids_tensor = torch.tensor(sum(input_ids, []), dtype=torch.int64).to(
             self.device, non_blocking=True
         )
@@ -1045,11 +1059,15 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         input_embeds = []
         extend_input_logprob_token_ids = []
 
+
+
         for i, (req, seq_len, pre_len) in enumerate(zip(reqs, seq_lens, prefix_lens)):
             req.req_pool_idx = req_pool_indices[i]
             assert seq_len - pre_len == req.extend_input_len
 
+            # 如果当前请求有 prefill
             if pre_len > 0:
+                #! 把从 tree_cache 读出来的 prefix_indices 写入到 req_to_token_pool 中被分配到的行里
                 self.req_to_token_pool.write(
                     (req.req_pool_idx, slice(0, pre_len)), req.prefix_indices
                 )
@@ -1132,9 +1150,12 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             )
 
         # Set fields
+        #! input_ids 是最终传到模型 forward 里的
+        #! 从上面可以看出是只包含 extend 部分的 （被打包成一个列表）
         self.input_ids = input_ids_tensor
         self.req_pool_indices = req_pool_indices_tensor
         self.seq_lens = seq_lens_tensor
+        #! 这里就是一整个 extend 部分的列表用到的 kvcache 的槽位
         self.out_cache_loc = out_cache_loc
         self.input_embeds = (
             torch.tensor(input_embeds).to(self.device, non_blocking=True)
@@ -1154,9 +1175,11 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         self.extend_input_logprob_token_ids = extend_input_logprob_token_ids
 
         # Write to req_to_token_pool
+        #! 将新分配好的空闲槽位，写入到 req_to_token_pool 里面
         if global_server_args_dict["attention_backend"] != "torch_native":
             # TODO: some tensors can be reused for ForwardBatchInfo (e.g., extend_lens, cumsum_start)
 
+            #! 这里用到了 triton 操作，来填充 req_to_token_pool
             write_req_to_token_pool_triton[(bs,)](
                 self.req_to_token_pool.req_to_token,
                 req_pool_indices_tensor,

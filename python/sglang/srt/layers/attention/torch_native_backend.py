@@ -148,7 +148,11 @@ class TorchNativeAttnBackend(AttentionBackend):
             # TODO: this loop process a sequence per iter, this is inefficient.
             # Need optimize the performance later.
 
+            # 对于每个请求
+
+            # 当前请求 q 长度
             seq_len_q = 1
+            # 当前请求 kv 长度，取决于他的上下文长度
             seq_len_kv = seq_lens[seq_idx]
             end_q = start_q + seq_len_q
             end_kv = start_kv + seq_len_kv
@@ -157,13 +161,24 @@ class TorchNativeAttnBackend(AttentionBackend):
 
             # get key and value from cache. per_req_tokens contains the kv cache
             # index for each token in the sequence.
+            # 当前请求在 req_to_token_pool 中的对应行
             req_pool_idx = req_pool_indices[seq_idx]
+            # 取出kvcache对应的所有索引
             per_req_tokens = req_to_token[req_pool_idx, :seq_len_kv]
+
+            # [total_token, num_heads, head_dim]
+            # k_cache[per_req_tokens] 以后变成 [顺序的当前k cache, num_head, head_dim]
+            # 然后 movedim(0, 1)，把第一维移到第二维，变成 [num_head, 顺序的当前k cache, head_dim]
             per_req_key = k_cache[per_req_tokens].movedim(0, query.dim() - 2)
             per_req_value = v_cache[per_req_tokens].movedim(0, query.dim() - 2)
 
+            # scaled_dot_product_attention() 期望 [batch, num_heads, seq_len, head_dim] 的形式
             per_req_out = (
+                #! 这里的操作就是 当前层，拥有所有head的k,q,v信息，然后一次性完成attention
+                # scaled_dot_product_attention 是 PyTorch 自 v2.0 起引入的一个 高性能原生注意力计算接口，其核心目标是统一调用接口，
+                # 同时自动利用底层高效实现（如 FlashAttention / Triton / cuDNN / CUTLASS / CPU 实现等）
                 scaled_dot_product_attention(
+                    # 这里添加一个第一维,变成 [1, num_head, 顺序的当前 k cache, head_dim]
                     per_req_query.unsqueeze(0),
                     per_req_key.unsqueeze(0),
                     per_req_value.unsqueeze(0),
@@ -172,8 +187,9 @@ class TorchNativeAttnBackend(AttentionBackend):
                     is_causal=causal,
                 )
                 .squeeze(0)
-                .movedim(query.dim() - 2, 0)
+                .movedim(query.dim() - 2, 0)  # 得到结果以后再变回去
             )
+            # 把当前请求得到的结果返回，结构还是打成原来的形式，batch中所有需要 extend/docode 都打成一个列表
             output[start_q:end_q, :, :] = per_req_out
             start_q, start_kv = end_q, end_kv
 
@@ -254,10 +270,15 @@ class TorchNativeAttnBackend(AttentionBackend):
         self._run_sdpa_forward_decode(
             q_,
             o_,
+            # 这一层的 k cache
             forward_batch.token_to_kv_pool.get_key_buffer(layer.layer_id),
+            # 这一层的 v cache
             forward_batch.token_to_kv_pool.get_value_buffer(layer.layer_id),
+            # 完整的 req_to_token_pool 内容
             forward_batch.req_to_token_pool.req_to_token,
+            # 一整个 batch 的在 req_to_token_pool 中的索引
             forward_batch.req_pool_indices,
+            # 总长度(prefix + extend 长度)
             forward_batch.seq_lens,
             scaling=layer.scaling,
             enable_gqa=use_gqa,
