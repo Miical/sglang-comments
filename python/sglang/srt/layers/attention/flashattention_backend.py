@@ -627,6 +627,7 @@ class FlashAttentionBackend(AttentionBackend):
         q_rope: Optional[torch.Tensor] = None,
         k_rope: Optional[torch.Tensor] = None,
     ):
+        # 如果 kv 非空，保存到 kv cache
         if k is not None:
             assert v is not None
             if save_kv_cache:
@@ -715,20 +716,34 @@ class FlashAttentionBackend(AttentionBackend):
                 window_size = (-1, -1)
 
             result = flash_attn_with_kvcache(
+                # Q（这里是整个batch拼起来的 query）
                 q=q.contiguous().view(-1, layer.tp_q_head_num, layer.head_dim),
+                # k_cache 本身
                 k_cache=key_cache,
+                # v_cache 本身
                 v_cache=value_cache,
+                # req_to_token 中的对应行，用于索引 kv_cache
                 page_table=page_table,
+                # 序列长度
                 cache_seqlens=cache_seqlens,
+                # 每个样本在 batch 中的起始位置
                 cu_seqlens_q=cu_seqlens_q,
                 cu_seqlens_k_new=cu_seqlens_k if not use_local_attn else None,
+                # 最大的 query 序列长度
                 max_seqlen_q=max_seqlen_q,
+                # softmax 缩放系数
                 softmax_scale=layer.scaling,
+
                 causal=False if use_cascade_attn else causal,
+                # window_size 控制每个 query 看多远。如果设置为 (-1, -1) 就是“放开眼界看全场”（Full Attention），
+                # 如果设为 (128, 0) 就是“只回头看过去 128 步”，用于节省计算、做局部注意力
                 window_size=window_size,
+                # softcap 是对 softmax 输出做上限截断（clipping）的一个阈值，防止注意力 logits 过大导致数值不稳定。
                 softcap=layer.logit_cap,
+                # 做反量化
                 k_descale=k_descale,
                 v_descale=v_descale,
+                # 是否返回 softmax 的 log-sum-exp 值，只有在 cascade attention 的时候才用得到
                 return_softmax_lse=use_cascade_attn,
             )
 
