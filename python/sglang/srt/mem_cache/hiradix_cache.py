@@ -81,6 +81,7 @@ class HiRadixCache(RadixCache):
             height += 1
         return height
 
+    # device -> host
     def write_backup(self, node: TreeNode, write_back=False):
         host_indices = self.cache_controller.write(
             device_indices=node.value,
@@ -226,6 +227,7 @@ class HiRadixCache(RadixCache):
             if len(x.parent.children) == 0 and x.parent.evicted:
                 heapq.heappush(leaves, x.parent)
 
+    # host -> device
     def load_back(
         self, node: TreeNode, mem_quota: Optional[int] = None
     ) -> Optional[torch.Tensor]:

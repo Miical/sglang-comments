@@ -193,7 +193,7 @@ if __name__ == "__main__":
 
     outlines.caching.clear_cache()
     test_main(r"The google's DNS sever address is " + IP_REGEX)
-    test_main(r"霍格沃茨特快列车|霍比特人比尔博")
+    test_main(r"|霍格沃茨特快列车霍比特人比尔博")
     # 霍格: \xe9\x9c\x8d \xe6\xa0\xbc ...
     # 霍比: \xe9\x9c\x8d \xe6\xaf\x94 ...
 

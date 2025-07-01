@@ -67,6 +67,7 @@ class SamplingParams:
         self.min_new_tokens = min_new_tokens
         self.regex = regex
         self.n = n
+        # ! 这里控制了结构化生成的方式
         self.json_schema = json_schema
         self.ebnf = ebnf
         self.structural_tag = structural_tag

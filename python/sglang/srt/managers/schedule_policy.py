@@ -452,12 +452,14 @@ class PrefillAdder:
         if req.sampling_params.ignore_eos and getattr(self.tree_cache, "disable", True):
             return self.add_one_req_ignore_eos(req, has_chunked_req)
 
+        # 整个请求的总token数 prefill + decode(max)
         total_tokens = req.extend_input_len + min(
             req.sampling_params.max_new_tokens, CLIP_MAX_NEW_TOKENS_ESTIMATION
         )
         input_tokens = req.extend_input_len
         prefix_len = len(req.prefix_indices)
 
+        # total_tokens 不能大于剩余容量，否则无法添加
         if total_tokens >= self.rem_total_tokens:
             return AddReqResult.NO_TOKEN
 
@@ -480,6 +482,9 @@ class PrefillAdder:
                 input_tokens = req.extend_input_len
                 prefix_len = len(req.prefix_indices)
 
+            # 条件1: 如果有rem_chunk_tokens 就代表打开了chunked prefill
+            #       如果打开了is_mixed，rem_chunk_tokens 就已经减去了正在decode的req的数量。接下来可以和decode的req混跑
+            # 条件2: 如果 input_tokens 的数量小于等于 rem_chunk_tokens，则不需要去 chunked
             if self.rem_chunk_tokens is None or input_tokens <= self.rem_chunk_tokens:
                 # Non-chunked prefill
                 self.can_run_list.append(req)

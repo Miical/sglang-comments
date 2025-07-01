@@ -264,7 +264,6 @@ class Scheduler(
 
         # Check whether overlap can be enabled
         # Overlap scheduler 是一种调度策略，旨在通过重叠计算和通信来提高性能
-        # TODO: Overlap scheduler 原理
         if not self.is_generation:
             self.enable_overlap = False
             logger.info("Overlap scheduler is disabled for embedding models.")
@@ -363,6 +362,7 @@ class Scheduler(
         )
 
         # Init the grammar backend for constrained generation
+        # ! constrained generation
         self.grammar_queue: List[Req] = []
         if not server_args.skip_tokenizer_init:
             self.grammar_backend = create_grammar_backend(
@@ -641,7 +641,7 @@ class Scheduler(
         """A normal scheduler loop."""
         while True:
             recv_reqs = self.recv_requests()
-            # 把请求放到了等待队列中
+            # 把请求放到了等待队列中 waiting_queue
             self.process_input_requests(recv_reqs)
 
             batch = self.get_next_batch_to_run()
@@ -1157,6 +1157,7 @@ class Scheduler(
             self.stats.num_queue_reqs = len(self.waiting_queue)
             self.metrics_collector.log_stats(self.stats)
 
+    # 请求 -> batch
     def get_next_batch_to_run(self) -> Optional[ScheduleBatch]:
         # Merge the prefill batch into the running batch
         # last_batch 是刚执行完的 batch
@@ -1164,9 +1165,8 @@ class Scheduler(
         if self.last_batch and self.last_batch.forward_mode.is_extend():
             # 如果有 chunked_req
             if self.chunked_req:
-                # ? 把 chunked_req 从 last_batch 中移除
-                # ? 并且把 chunked_req 放到 tree_cache 中
-                # ? 清空原来的 kv cache
+                # 在这里把 chunked_req 从 last_batch 中移除
+                # 后面重新去处理和添 chunked_req
 
                 # Move the chunked request out of the batch so that we can merge
                 # only finished requests to running_batch.
@@ -1179,7 +1179,7 @@ class Scheduler(
             # Filter batch
             # 更新 last_batch 的相关状态
             last_bs = self.last_batch.batch_size()
-            self.last_batch.filter_batch()
+            self.last_batch.filter_batch() # 在这里面去过滤一下还没有完成的请求
             if self.last_batch.batch_size() < last_bs:
                 self.running_batch.batch_is_full = False
 
@@ -1337,6 +1337,7 @@ class Scheduler(
         )
         new_batch.prepare_for_extend()
 
+        # 如果需要合并就在这里合并
         # Mixed-style chunked prefill
         if (
             self.is_mixed_chunk
